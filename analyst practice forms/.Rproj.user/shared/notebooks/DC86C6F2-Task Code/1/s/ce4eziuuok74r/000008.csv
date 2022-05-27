@@ -1,0 +1,2 @@
+"0","test_thera <- test_thera %>% rename(sex = gender, ""blood pressure"" = ""systolic bp preoperative"" )"
+"0","thera_variable_names <- colnames(test_thera)"

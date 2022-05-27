@@ -1,0 +1,269 @@
+---
+title: "Analyst Tasks"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r}
+# load packages
+set.seed(9999)
+library(tidyverse)
+library(readxl)
+library(mice)
+library(scales)
+library(ggrepel)
+library(rstatix)
+```
+**Task 1.**
+```{r}
+test_thera <- read_excel('Research Analyst_16SEPT2021.xlsx')
+```
+
+**Task 2.**
+```{r}
+thera_variable_names <- colnames(test_thera)
+thera_variable_names
+```
+
+**Task 3.**  
+The number of rows is 1079, and the number of columns is 20.
+```{r}
+thera_nrow <- nrow(test_thera)
+thera_ncol <- ncol(test_thera)
+```
+
+**Task 4.**
+```{r}
+tail(test_thera$age, n = 6)
+```
+
+**Task 5.**
+```{r}
+test_thera <- test_thera %>% rename(sex = gender, "blood pressure" = "systolic bp preoperative" )
+thera_variable_names <- colnames(test_thera)
+```
+
+**Task 6.**
+```{r}
+test_thera$`income bracket` = recode(test_thera$`income bracket`,
+                                     '1' = '<10,000',
+                                     '2' = '10,000 to 20,000',
+                                     '3' = '20,001 to 30,000',
+                                     '4'='30,001 to 40,000',
+                                     '5'='>40,000' )
+```
+**Task 7.**
+```{r}
+head(test_thera$`income bracket`, n= 6)
+```
+**Task 8.**
+Seed was generated from no. 9999
+
+Imputations closest to the mean of columns were selected: 58.14 for duration of operation and 137.7 for blood pressure, respectively.
+
+Imputation 2 has the closest mean to duration of operation at 58.42, and the closest mean to blood pressure at 139.2, thus Imputation 2 was selected.
+```{r}
+summary(test_thera$`duration of operation`)
+summary(test_thera$`blood pressure`)
+
+thera_imputed <- select(test_thera, `duration of operation`, `blood pressure`)
+
+# change space to underscore to run through MICE
+thera_imputed <- thera_imputed %>% rename(duration_of_operation = "duration of operation",
+                                          blood_pressure = "blood pressure")
+
+#Using predictive mean matching method from mice. Generating 5 datasets
+thera_imp <- mice(thera_imputed, m= 5, method = c("pmm","pmm"), maxit = 20)
+
+
+summary(thera_imp$imp$duration_of_operation)
+summary(thera_imp$imp$blood_pressure)
+
+selected_imp <- complete(thera_imp,2)
+summary(selected_imp)
+```
+
+**Task 9.**
+
+The 5 chosen variables are discharge status, blood pressure, age, sex, type of surgery
+```{r}
+
+task9_variables <- test_thera %>% select(`blood pressure`, `discharge status`, age, sex, `type of surgery`)
+
+task9_variables <- task9_variables %>% mutate(`discharge status` = as.factor(`discharge status`),
+                                              sex = as.factor(sex),
+                                              `type of surgery` = as.factor(`type of surgery`))
+
+summary(task9_variables)
+
+#Type of Surgery
+TS_data<-  task9_variables %>% group_by(`type of surgery`)%>% summarise(count = n())
+
+Typeofsurgery_graph<- ggplot(TS_data, aes(x="", y= count, fill=`type of surgery`)) +
+geom_bar(stat= "identity",width = 1, color = "white",
+size = 1)+ coord_polar("y", start=0) +
+geom_text(aes(label = paste0(count," (",
+          percent(count / sum(count)),
+          ")")), position = position_stack(vjust = 0.5)) +
+          ggtitle("Total Operations Completed by Type") +
+          scale_fill_discrete(name = "Surgery Types Performed") + 
+          theme(axis.title.y=element_blank(),  axis.ticks.y=element_blank())
+
+Typeofsurgery_graph
+
+#Age and Sex
+AS_data <- task9_variables %>% group_by(age, sex) %>% summarise(count=n())
+
+Age_distribution_by_sex <- ggplot(AS_data, aes(x=age, y=count, fill=sex)) +
+                                  geom_bar(stat="identity") + 
+                                  scale_x_continuous(breaks = pretty_breaks(n=9)) + 
+                                  ggtitle("Age Distribution of MORG Trial Patients")
+Age_distribution_by_sex
+
+#Discharge Status
+DIS_data <- task9_variables %>% group_by(`discharge status`) %>% summarise(count=n())
+
+Discharge_ratio <- ggplot(DIS_data, aes(x="",y=count, fill=`discharge status`)) + 
+                    geom_bar(stat="identity") + 
+                    geom_text(aes(label=paste0(count)), position=position_stack(vjust=0.5)) +
+                    ggtitle("Patient Status on Discharge") +
+                    scale_fill_discrete(name="Patient Status") +
+                    theme(plot.title=element_text(hjust = 0.5), 
+                          axis.title.y=element_blank(),
+                          axis.ticks.y=element_blank()) +
+                    coord_flip()
+
+Discharge_ratio
+
+#Blood Pressure
+
+BP_distribution <- ggplot(task9_variables, aes(x=`blood pressure`)) + 
+                     geom_histogram(color="darkblue", fill="lightblue") + 
+                     scale_x_continuous(breaks=pretty_breaks(n=9)) + 
+                     ggtitle("Blood Pressure Distribution of MORG Trial Patients") + 
+                     theme(plot.title=element_text(hjust=0.5)) + 
+                     xlab("Blood Pressure (mmHg)")
+
+BP_distribution
+```
+
+**Task 10.**
+
+Tested for significant difference between high risk and low risk populations for all variables. To test the difference in means, a t-test was selected for numeric variables, while a chi- squared test was selected for categorical variables. Both tests can help visualize differences between both groups and provide a probability of the significance of the difference.
+
+Significant difference was found between groups for blood pressure, GCS leak, Age, Duration of Operation, Sex, and Lumbar Drainage
+
+```{r}
+test_thera <- test_thera %>% mutate(risk_status = as.factor(case_when(`days in the NICU` <= 2 ~ "low risk",
+                                                            `days in the NICU` > 2 ~ "high risk")))
+#Performing multiple T-tests.
+#T Tests are used for numeric variables
+t1<- t_test(test_thera, `blood pressure` ~ risk_status )
+t2<- t_test(test_thera, GCS ~ risk_status)
+t3<- t_test(test_thera, age ~ risk_status)
+t4<- t_test(test_thera, `duration of operation` ~ risk_status)
+
+output_numeric_var <- bind_rows(t1,t2,t3,t4)
+output_numeric_var
+
+#Chi SQ Tests used for categorical variables
+chisq.test(test_thera$risk_status,test_thera$`income bracket`)
+chisq.test(test_thera$risk_status,test_thera$`diabetes mellitus`)
+chisq.test(test_thera$risk_status,test_thera$`CSF leak`)
+chisq.test(test_thera$risk_status,test_thera$`type of surgery`)
+chisq.test(test_thera$risk_status,test_thera$sex)
+chisq.test(test_thera$risk_status,test_thera$`discharge status`)
+chisq.test(test_thera$risk_status,test_thera$`glucorticoids`)
+chisq.test(test_thera$risk_status,test_thera$`SSI`)
+chisq.test(test_thera$risk_status,test_thera$`lumbar drainage`)
+chisq.test(test_thera$risk_status,test_thera$`entry of paranasal sinus`)
+```
+
+**Task 11.**
+
+Tested univariate models between risk status and each variable in the dataset (excluding NICU time and patient ID)
+Models significant at a 0.05 critical level were included in the multivariate model.
+Any terms not significant in the multivariate model were excluded in the final multivariate model
+
+Univariate Results:
+As variables:
+1. Type of Surgery, Use of Post-Operative Drain, Entry into paranasal sinus, diabetes mellitus, SSI, discharge status, glucorticoids, income bracket were not significant at a 0.05 critical level and will be excluded from the multivariate model
+
+2. Age, sex,csf, duration of operation, GCS leak, lumbar drainage, blood pressure were significant at a 0.05 critical level and will be included in the multivariate model
+
+For sake of cleanliness, variable interactions were not included in the multivariate model.
+
+The variables: 'CSF leak' and GCS were not significant in the multivariate model and were thus excluded.
+
+Final Model Results:
+An increase in age, being a male, having lumbar drainage used, and an increase in blood pressure all contribute to a higher risk of being placed in the "high-risk" status. However, an increase in the duration of operation does not contribute to a higher risk of being placed in the "high-risk status" in the model.
+
+```{r}
+
+#Turned risk status into binary variable
+test_thera$risk_status_binary <- ifelse(test_thera$risk_status == "high risk", 1, 0)
+
+#Logarithmic Regression will be used as Risk Status is a Binary Variable
+
+model_age <- glm(risk_status_binary ~ age, data = test_thera, family = binomial)
+summary(model_age)$coef
+
+model_sex <- glm(risk_status_binary ~ sex, data = test_thera, family = binomial)
+summary(model_sex)$coef
+
+model_surg <- glm(risk_status_binary ~ `type of surgery`, data = test_thera, family = binomial)
+summary(model_surg)$coef
+
+model_drain <- glm(risk_status_binary ~ `use of postoperative drain`, data = test_thera, family = binomial)
+summary(model_drain)$coef
+
+model_sinus <- glm(risk_status_binary ~ `entry of paranasal sinus`, data = test_thera, family = binomial)
+summary(model_sinus)$coef
+
+model_csf <- glm(risk_status_binary ~ `CSF leak`, data = test_thera, family = binomial)
+summary(model_csf)$coef
+
+model_duration <- glm(risk_status_binary ~ `duration of operation`, data = test_thera, family = binomial)
+summary(model_duration)$coef
+
+model_diabetes <- glm(risk_status_binary ~ `diabetes mellitus`, data = test_thera, family = binomial)
+summary(model_diabetes)$coef
+
+model_gcs <- glm(risk_status_binary ~ `GCS`, data = test_thera, family = binomial)
+summary(model_gcs)$coef
+
+model_ssi <- glm(risk_status_binary ~ `SSI`, data = test_thera, family = binomial)
+summary(model_ssi)$coef
+
+model_discharge <- glm(risk_status_binary ~ `discharge status`, data = test_thera, family = binomial)
+summary(model_discharge)$coef
+
+model_glucorticoids <- glm(risk_status_binary ~ `glucorticoids`, data = test_thera, family = binomial)
+summary(model_glucorticoids)$coef
+
+model_lumbar <- glm(risk_status_binary ~ `lumbar drainage`, data = test_thera, family = binomial)
+summary(model_lumbar)$coef
+
+model_income <- glm(risk_status_binary ~ `income bracket`, data = test_thera, family = binomial)
+summary(model_income)$coef
+
+model_bp <- glm(risk_status_binary ~ `blood pressure`, data = test_thera, family = binomial)
+summary(model_bp)$coef
+
+
+
+task11_model <- glm(risk_status_binary ~ age + sex + `CSF leak` +`duration of operation`+ GCS + `lumbar drainage` + `blood pressure`, data = test_thera, family = binomial)
+
+summary(task11_model)$coef
+
+
+
+task11_finalmodel <- glm(risk_status_binary ~ age + sex  +`duration of operation` + `lumbar drainage` + `blood pressure`, data = test_thera, family = binomial)
+
+#Final Model
+summary(task11_finalmodel)$coef
+
+```
+
+
