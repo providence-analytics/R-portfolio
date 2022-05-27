@@ -1,0 +1,94 @@
+---
+title: "Testing Youtube API Query and Document Matrices"
+output: html_document
+---
+
+Loading Libraries
+```{r}
+set.seed(1234)
+library(dplyr)
+library(tuber)
+library(tm)
+library(tidyverse)
+library(wordcloud)
+library(RColorBrewer)
+```
+
+
+Connecting to Youtube API
+```{r}
+api_key <- "AIzaSyB-t-2C_R7oxYKZHRGmPVuUDh1mABjX5B4"
+client_id <- "948879317402-mmlrs047ea59ebead9o1fk27sdd8h8li.apps.googleusercontent.com"
+client_secret <- "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"
+yt_oauth(client_id,client_secret)
+```
+
+Pull Data from Nikocado Avocado Mukbang Youtube Channel. 
+Selected relevant data columns for visualization.
+Converted the character variable: 'publication date' into a date variable to derive total days since video was posted. Removed weird • character that nikocado likes to put in alot of his video titles for some reason
+```{r} 
+chstat <- get_all_channel_video_stats(channel_id = "UCDwzLWgGft47xQ30u-vjsrg")
+nikodata <- subset(chstat,select=-c(id,favoriteCount,commentCount,url,channel_id,channel_title))
+
+nikodata$publication_date <- substr(nikodata$publication_date,1,10)
+nikodata <- nikodata %>%
+  mutate(publication_date = as.Date(publication_date, "%Y-%m-%d"))%>%
+  mutate(NumberOfDays = as.numeric(Sys.Date() - publication_date))
+
+nikodata$title <- gsub("•"," ", nikodata$title)
+```
+
+Creating a Word Cloud of most used words.
+Turn title columns into a corpus. Removed punctuation, numbers and common stopwords from corpus
+```{r}
+nikotitle <- nikodata$title
+nikocorpus <- Corpus(VectorSource(nikotitle))
+#inspect(nikocorpus)
+
+nikocorpus <- tm_map(nikocorpus, removePunctuation)
+nikocorpus <- tm_map(nikocorpus, content_transformer(removeWords), stopwords("english"))
+nikocorpus <- tm_map(nikocorpus, removeNumbers)
+
+wordcloud(nikocorpus, max.words=75, random.order=FALSE,            colors=brewer.pal(12, "Dark2"))
+```
+
+Identifying effect of words on total views
+Keeping top 100 terms
+```{r}
+nikodtm <- DocumentTermMatrix(nikocorpus)
+nikodtms <- removeSparseTerms(nikodtm, .995)
+
+nikomatrix<-as.matrix(nikodtms)
+word.freq <-colSums(nikomatrix)
+word.freq <-sort(word.freq,decreasing=T)
+
+word.freq[1:10] 
+
+corr <- cor(as.numeric(nikodata$viewCount), nikomatrix) 
+corr <- abs(corr) 
+
+top100 = order(corr, decreasing=T)[1:100] 
+top100words = colnames(corr)[top100] 
+top100words
+
+nikocombineddf = as.data.frame(cbind(viewcount = as.numeric(nikodata$viewCount), nikomatrix)) 
+
+```
+
+
+Stepwise Regression for first 50 terms, and terms of interest. Subjectively selected
+```{r}
+#Result of stepwise model with 50 most used terms
+nikomodel = lm(viewcount~chick + fire + extreme + noodles + mukbang + spicy + heart + cakes + takis, data=nikocombineddf)
+
+summary(nikomodel)
+```
+Results:
+Stepwise model starting from most reoccurring terms does not encompass many variables before additions to model are no longer significant. This does not account for specific food items.
+
+In addition, many terms are only mentioned once or rarely, which affects the probability of the term being significant when included in the model.  
+
+A new model of only food terms could be used instead to visualize the effect on total views, but the standard error may be too high due to lack of samples + it does not account for natural growth of a channel.
+
+
+
